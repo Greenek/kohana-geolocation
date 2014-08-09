@@ -45,16 +45,6 @@ class Kohana_Geolocation {
 	{
 		$this->_config = Kohana::$config->load('geolocation');
 
-		if ($ip === NULL)
-		{
-			$ip = Request::$client_ip;
-		}
-
-		if ( ! Valid::ip($ip))
-		{
-			throw new Kohana_Exception('IP address is not valid.');
-		}
-
 		if ($this->_config['auto_update'] > 0)
 		{
 			$this->check_database();
@@ -184,8 +174,18 @@ class Kohana_Geolocation {
 		return DB::query(Database::INSERT, $query)->execute();
 	}
 
-	protected function _set_ip($ip)
+	protected function _set_ip($ip = NULL)
 	{
+		if ($ip === NULL)
+		{
+			$ip = Request::$client_ip;
+		}
+
+		if ( ! Valid::ip($ip))
+		{
+			throw new Kohana_Exception('IP address is not valid.');
+		}
+
 		$this->_ip = $ip;
 
 		if ($this->_config['cache_ip'] === TRUE)
