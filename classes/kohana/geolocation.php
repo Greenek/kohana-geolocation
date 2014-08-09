@@ -31,16 +31,14 @@ class Kohana_Geolocation {
 
 	public static function factory($ip = NULL, $key = NULL)
 	{
-		$geolocation = new Geolocation($ip, $key);
+		$geolocation = new Geolocation($ip);
 
-		if ($key === NULL)
+		if ($key !== NULL)
 		{
-			return $geolocation;
+			$geolocation = $geolocation->get($key);
 		}
-		else
-		{
-			return $geolocation->get($key);
-		}
+
+		return $geolocation;
 	}
 
 	public function __construct($ip = NULL)
@@ -83,56 +81,65 @@ class Kohana_Geolocation {
 
 	public function update_database()
 	{
-		$request = Request::factory($this->_config['database_url'])
-			->execute();
+		$tmp_file = '/tmp/geoip.gz';
 
-		if ($request->status() !== 200)
+		// Open connection to Geo-IP database
+		$output = fopen($tmp_file, 'wb');
+
+		$curl = curl_init();
+		curl_setopt($curl, CURLOPT_URL, $this->_config['database_url']);
+		curl_setopt($curl, CURLOPT_FILE, $output);
+		curl_setopt($curl, CURLOPT_ENCODING, 'gzip');
+		curl_setopt($curl, CURLOPT_TIMEOUT, 10);
+
+		$result = curl_exec($curl);
+
+		curl_close($curl);
+		fclose($output);
+
+		if ($result === FALSE)
+			return FALSE;
+
+		$output = gzopen($tmp_file, 'rb');
+
+		// Probably connection limit has been reached
+		if (gzgets($output)[0] !== '<')
+		{
+			$rows = array();
+			gzrewind($output);
+
+			while ($line = gzgets($output))
+			{
+				if ($line[0] === '#')
+					continue;
+
+				$rows[] = '('.trim($line).')';
+			}
+		}
+
+		gzclose($output);
+		@unlink($tmp_file);
+
+		if (empty($rows))
 			return FALSE;
 
 		// Truncate table
 		DB::query(Database::DELETE, 'TRUNCATE TABLE '.$this->_config['table_name'])->execute();
 
-		// Refactor names
-		$refactor = array(
-			'ip_to_country' => $this->_config['table_name'],
-			'IP_FROM'		=> 'ip_from',
-			'IP_TO'			=> 'ip_to',
-			'REGISTRY'		=> 'registry',
-			'ASSIGNED'		=> 'assigned',
-			'CTRY'			=> 'country_iso',
-			'CNTRY'			=> 'country_code',
-			'COUNTRY'		=> 'country_name'
-		);
-
-		// Read response line by line
-		$db = explode(PHP_EOL, $request->body());
-
-		while (($line = current($db)) !== FALSE)
-		{
-			if (strpos($line, 'INSERT INTO') !== FALSE)
-			{
-				$query = str_replace(array_keys($refactor), array_values($refactor), $line);
-
-				do
-				{
-					$line = next($db);
-					$query .= PHP_EOL.$line;
-				} while(substr(trim($line), -1) !== ';');
-
-				$insert = DB::query(Database::INSERT, $query)->execute();
-			}
-
-			next($db);
-		}
+		// Split rows into groups and insert
+		$rows = array_chunk($rows, 300);
+		array_walk($rows, array($this, '_insert_rows'));
 
 		Kohana::cache(Geolocation::CACHE_KEY, TRUE, $this->_config['auto_update']);
 
 		return TRUE;
 	}
 
-	protected function _calc_ip_value(array $ip_segments)
+	protected function _calc_ip_value($ip)
 	{
-		$value = $ip_segments[3]
+		$ip_segments = array_map('intval', explode('.', $ip));
+
+		$value = ($ip_segments[3])
 		       + ($ip_segments[2] * 256)
 		       + ($ip_segments[1] * 256 * 256)
 		       + ($ip_segments[0] * 256 * 256 * 256);
@@ -140,14 +147,21 @@ class Kohana_Geolocation {
 		return $value;
 	}
 
-	protected function _get_ip_row()
+	protected function _get_ip_row($ip = NULL)
 	{
+		if ($ip === NULL)
+		{
+			$ip = $this->_ip;
+		}
+
+		$ip_value = $this->_calc_ip_value($ip);
+
 		try
 		{
 			$query = DB::select()
 				->from($this->_config['table_name'])
-				->where('ip_from', '<=', $this->_ip_value)
-				->where('ip_to', '>=', $this->_ip_value)
+				->where('ip_from', '<=', $ip_value)
+				->where('ip_to', '>=', $ip_value)
 				->limit(1)
 				->as_object()
 				->execute()
@@ -156,23 +170,23 @@ class Kohana_Geolocation {
 		catch (Database_Exception $e)
 		{
 			if (preg_match('/Table \'([a-z0-9._]+)\' doesn\'t exist/', $e->getMessage()))
-			{
 				throw new Geolocation_Exception('Geolocation module not initialized. Please import SQL from '.MODPATH.'geolocation/schema/country_ip.sql.');
-			}
 		}
 
 		return $query;
 	}
 
+	protected function _insert_rows(array $rows)
+	{
+		$query = 'INSERT INTO `'.$this->_config['table_name'].'` (`ip_from`, `ip_to`, `registry`, `assigned`, `country_iso`, `country_code`, `country_name`) VALUES'
+		       . implode(',', $rows);
+
+		return DB::query(Database::INSERT, $query)->execute();
+	}
+
 	protected function _set_ip($ip)
 	{
 		$this->_ip = $ip;
-
-		// Split to segments
-		$this->_ip_segments = array_map('intval', explode('.', $ip));
-
-		// Calc value
-		$this->_ip_value = $this->_calc_ip_value($this->_ip_segments);
 
 		// Get info
 		$this->_info = $this->_get_ip_row();
