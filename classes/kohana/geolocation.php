@@ -11,8 +11,8 @@ class Kohana_Geolocation {
 	/* Country name */
 	const COUNTRY_NAME = 'country_name';
 
-	/* Cache key name */
-	const CACHE_KEY = 'geolocation.up-to-date';
+	/* Cache update key */
+	const CACHE_UPDATE_KEY = 'geolocation.up-to-date';
 
 	/* Object IP */
 	protected $_ip;
@@ -65,11 +65,11 @@ class Kohana_Geolocation {
 
 	public function check_database()
 	{
-		if (Kohana::cache(Geolocation::CACHE_KEY) === NULL)
+		if (Kohana::cache(Geolocation::CACHE_UPDATE_KEY) === NULL)
 		{
 			if ($this->update_database() === FALSE)
 			{
-				Kohana::cache(Geolocation::CACHE_KEY, FALSE, Date::HOUR);
+				Kohana::cache(Geolocation::CACHE_UPDATE_KEY, FALSE, Date::HOUR);
 			}
 		}
 	}
@@ -130,7 +130,7 @@ class Kohana_Geolocation {
 		$rows = array_chunk($rows, 300);
 		array_walk($rows, array($this, '_insert_rows'));
 
-		Kohana::cache(Geolocation::CACHE_KEY, TRUE, $this->_config['auto_update']);
+		Kohana::cache(Geolocation::CACHE_UPDATE_KEY, TRUE, $this->_config['auto_update']);
 
 		return TRUE;
 	}
@@ -188,8 +188,23 @@ class Kohana_Geolocation {
 	{
 		$this->_ip = $ip;
 
-		// Get info
-		$this->_info = $this->_get_ip_row();
+		if ($this->_config['cache_ip'] === TRUE)
+		{
+			$cache_ip = 'geolocation.ip.'.$ip;
+			$info = Kohana::cache($cache_ip);
+		}
+
+		if (empty($info))
+		{
+			$info = $this->_get_ip_row();
+		}
+
+		$this->_info = $info;
+
+		if (isset($cache_ip))
+		{
+			Kohana::cache($cache_ip, $info, Date::HOUR);
+		}
 	}
 
 }
