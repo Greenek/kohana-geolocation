@@ -183,7 +183,7 @@ class Kohana_Geolocation {
 
 		if ( ! Valid::ip($ip))
 		{
-			throw new Kohana_Exception('IP address is not valid.');
+			throw new Geolocation_Exception('IP address is not valid.');
 		}
 
 		$this->_ip = $ip;
