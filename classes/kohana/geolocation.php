@@ -93,7 +93,7 @@ class Kohana_Geolocation {
 		$output = gzopen($tmp_file, 'rb');
 
 		// Probably connection limit has been reached
-		if (gzgets($output)[0] !== '<')
+		if (substr(gzgets($output), 0, 1) !== '<')
 		{
 			$rows = array();
 			gzrewind($output);
